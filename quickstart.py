@@ -1,6 +1,6 @@
 '''
 Reading GMAIL using Python
-	- Abhishek Chhibber
+
 '''
 
 '''
@@ -106,7 +106,7 @@ print(final_list)
 message_bodies = []
 
 for item in final_list:
-    message_bodies.append(item['Message_body'])
+    message_bodies.append([item['Message_body']])
 
 print(message_bodies)
  
