@@ -101,7 +101,15 @@ for mssg in mssg_list:
     final_list.append(temp_dict)
 
 print ("Total messages retrieved: ", len(final_list))
+print(final_list)
 
+message_bodies = []
+
+for item in final_list:
+    message_bodies.append(item['Message_body'])
+
+print(message_bodies)
+ 
 # Exporting the values as .csv
 with open('last_10_emails.csv', 'w', encoding='utf-8', newline='') as csvfile: 
     fieldnames = ['Sender', 'Subject', 'Date', 'Snippet', 'Message_body']
