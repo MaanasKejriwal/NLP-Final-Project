@@ -1,23 +1,4 @@
-'''
-Reading GMAIL using Python
-
-'''
-
-'''
-This script does the following:
-- Go to Gmal inbox
-- Find and read all the unread messages
-- Extract details (Date, Sender, Subject, Snippet, Body) and export them to a .csv file / DB
-- Mark the messages as Read - so that they are not read again 
-'''
-
-'''
-Before running this script, the user should get the authentication by following 
-the link: https://developers.google.com/gmail/api/quickstart/python
-Also, client_secret.json should be saved in the same directory as this file
-'''
-
-# Importing required libraries
+# ALL IMPORTS
 from apiclient import discovery
 from apiclient import errors
 from httplib2 import Http
@@ -30,7 +11,21 @@ import dateutil.parser as parser
 from datetime import datetime
 import datetime
 import csv
+import spacy
+import re
+from nltk.corpus import stopwords
+import nltk
+import emoji
+from spellchecker import SpellChecker
 
+# =====================================================================================================================================
+
+# VARIABLES
+
+nlp = spacy.load("en_core_web_sm")
+contraction_colloq_dict = {"btw": "by the way", "ain't": "is not", "aren't": "are not","can't": "cannot", "'cause": "because", "could've": "could have", "couldn't": "could not", "didn't": "did not",  "doesn't": "does not", "don't": "do not", "hadn't": "had not", "hasn't": "has not", "haven't": "have not", "he'd": "he would","he'll": "he will", "he's": "he is", "how'd": "how did", "how'd'y": "how do you", "how'll": "how will", "how's": "how is",  "I'd": "I would", "I'd've": "I would have", "I'll": "I will", "I'll've": "I will have","I'm": "I am", "I've": "I have", "i'd": "i would", "i'd've": "i would have", "i'll": "i will",  "i'll've": "i will have","i'm": "i am", "i've": "i have", "isn't": "is not", "it'd": "it would", "it'd've": "it would have", "it'll": "it will", "it'll've": "it will have","it's": "it is", "let's": "let us", "ma'am": "madam", "mayn't": "may not", "might've": "might have","mightn't": "might not","mightn't've": "might not have", "must've": "must have", "mustn't": "must not", "mustn't've": "must not have", "needn't": "need not", "needn't've": "need not have","o'clock": "of the clock", "oughtn't": "ought not", "oughtn't've": "ought not have", "shan't": "shall not", "sha'n't": "shall not", "shan't've": "shall not have", "she'd": "she would", "she'd've": "she would have", "she'll": "she will", "she'll've": "she will have", "she's": "she is", "should've": "should have", "shouldn't": "should not", "shouldn't've": "should not have", "so've": "so have","so's": "so as", "this's": "this is","that'd": "that would", "that'd've": "that would have", "that's": "that is", "there'd": "there would", "there'd've": "there would have", "there's": "there is", "here's": "here is","they'd": "they would", "they'd've": "they would have", "they'll": "they will", "they'll've": "they will have", "they're": "they are", "they've": "they have", "to've": "to have", "wasn't": "was not", "we'd": "we would", "we'd've": "we would have", "we'll": "we will", "we'll've": "we will have", "we're": "we are", "we've": "we have", "weren't": "were not", "what'll": "what will", "what'll've": "what will have", "what're": "what are",  "what's": "what is", "what've": "what have", "when's": "when is", "when've": "when have", "where'd": "where did", "where's": "where is", "where've": "where have", "who'll": "who will", "who'll've": "who will have", "who's": "who is", "who've": "who have", "why's": "why is", "why've": "why have", "will've": "will have", "won't": "will not", "won't've": "will not have", "would've": "would have", "wouldn't": "would not", "wouldn't've": "would not have", "y'all": "you all", "y'all'd": "you all would","y'all'd've": "you all would have","y'all're": "you all are","y'all've": "you all have","you'd": "you would", "you'd've": "you would have"}
+
+lemmatizer = nltk.stem.WordNetLemmatizer()
 
 # Creating a storage.JSON file with authentication details
 SCOPES = 'https://www.googleapis.com/auth/gmail.modify' # we are using modify and not readonly, as we will be marking the messages Read
@@ -45,9 +40,78 @@ user_id =  'me'
 label_id_one = 'INBOX'
 label_id_two = 'UNREAD'
 
-#Getting lasst 10 emails
+# =====================================================================================================================================
 
-#Getting last 10 emails
+# ALL FUNCTIONS
+
+# Fetching message body
+def extract_message_body(payload):
+    if 'parts' in payload: # check if 'parts' key exists
+        for part in payload['parts']:
+            if part['mimeType'] == 'text/plain':
+                data = part['body']['data']
+                clean_one = data.replace("-","+").replace("_","/") # decoding from Base64 to UTF-8
+                clean_two = base64.b64decode(clean_one) # decoding from Base64 to UTF-8
+                return clean_two.decode('utf-8') # return decoded text
+            elif part['mimeType'] == 'multipart/alternative':
+                return extract_message_body(part) # recursively search for the main message body within alternative parts
+    elif 'body' in payload:
+        data = payload['body']['data']
+        clean_one = data.replace("-","+").replace("_","/") # decoding from Base64 to UTF-8
+        clean_two = base64.b64decode(clean_one) # decoding from Base64 to UTF-8
+        return clean_two.decode('utf-8') # return decoded text
+    return '' # return empty string if message body not found
+
+# Function to clean up message body
+def clean_message_body(message_body):
+    # Remove reply indicators and add a note indicating it's a reply
+    cleaned_body = re.sub(r'(\s*>+\s*)+', '\n', message_body)
+    # Remove line breaks and whitespace
+    cleaned_body = cleaned_body.replace('\r', '').replace('\n', ' ').strip()  
+    cleaned_body = cleaned_body.replace('<', '').replace('>', '').replace('*', '')
+    cleaned_body = emoji.get_emoji_regexp().sub('', cleaned_body)
+    cleaned_body = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', cleaned_body)
+    return cleaned_body
+
+# Function to elongate contractions
+def elongate_contractions(text, contraction_dict):
+    # Regular expression pattern to find contractions
+    pattern = re.compile(r'\b(' + '|'.join(contraction_dict.keys()) + r')\b')
+    # Replace contractions with their full forms
+    elongated_text = pattern.sub(lambda match: contraction_dict[match.group(0)] if match.group(0) in contraction_dict else match.group(0), text)
+    return elongated_text
+
+# Function to lemmatize text
+def lemmatize_text(text):
+    doc = nlp(text)
+    lemmatized_tokens = [token.lemma_ for token in doc]
+    return ' '.join(lemmatized_tokens)
+
+# Function to format date
+def format_date(date_str):
+    parsed_date = parser.parse(date_str)  # Parse the date string
+    formatted_date = parsed_date.strftime("%A, %d %B %Y %I:%M %p")  # Format the date
+    return formatted_date
+
+# spell = SpellChecker()
+# def spell_check(text):
+#     corrected_text = []
+#     # Split the text into words
+#     words = text.split()
+#     for word in words:
+#         # Check if the word is misspelled
+#         corrected_word = spell.correction(word)
+#         # Append the corrected word if it's not None, otherwise keep the original word
+#         corrected_text.append(corrected_word if corrected_word is not None else word)
+#     # Join the corrected words back into a string
+#     return ' '.join(corrected_text)
+
+
+# =====================================================================================================================================
+
+# MAIN CODE
+
+# Getting last 10 emails
 unread_msgs = GMAIL.users().messages().list(userId='me', labelIds=[label_id_one, label_id_two], maxResults=10).execute()
 
 # We get a dictionary. Now reading values for the key 'messages'
@@ -78,41 +142,70 @@ for mssg in mssg_list:
             temp_dict['Snippet'] = value
 
     # Fetching message body
-    try:
-        if 'parts' in payld: # check if 'parts' key exists
-            mssg_parts = payld['parts'] # fetching the message parts
-            part_one = mssg_parts[0] # fetching first element of the part 
-            if 'body' in part_one: # check if 'body' key exists
-                part_body = part_one['body'] # fetching body of the message
-                if 'data' in part_body: # check if 'data' key exists
-                    part_data = part_body['data'] # fetching data from the body
-                    clean_one = part_data.replace("-","+").replace("_","/") # decoding from Base64 to UTF-8
-                    clean_two = base64.b64decode(clean_one) # decoding from Base64 to UTF-8
-                    soup = BeautifulSoup(clean_two, "html.parser")
-                    mssg_body = soup.get_text() # extracting text from HTML
-                    temp_dict['Message_body'] = mssg_body
-                else:
-                    temp_dict['Message_body'] = '' # set message body to empty if 'data' key is missing
-        else:
-            temp_dict['Message_body'] = '' # set message body to empty if 'parts' key is missing
-    except Exception as e:
-        print(f"Error fetching message body: {e}")
+    temp_dict['Message_body'] = extract_message_body(payld)
 
     final_list.append(temp_dict)
 
 print ("Total messages retrieved: ", len(final_list))
-print(final_list)
 
-message_bodies = []
-
+# Clean up message bodies and format dates
 for item in final_list:
-    message_bodies.append([item['Message_body']])
+    item['Message_body'] = lemmatize_text(item['Message_body'])
+    item['Message_body'] = clean_message_body(item['Message_body'])
+    item['Date'] = format_date(item['Date'])
+    item['Message_body'] = elongate_contractions(item['Message_body'], contraction_colloq_dict)
+    item['Message_body'] = re.sub(r'\s+', ' ', item['Message_body'])
 
-print(message_bodies)
- 
+
+stopwords.words('english');
+stop_words = set(stopwords.words('english'))
+
+#Rmove stopwords
+for item in final_list:
+    doc = nlp(item['Message_body'])
+    # Get tokens that are not stopwords
+    filtered_tokens = [token.text for token in doc if token.text.lower() not in stop_words]
+    # Join the filtered tokens back into a string
+    item['Message_body'] = ' '.join(filtered_tokens)
+
+# Print formatted messages
+for item in final_list:
+    print('='*100)
+    print("Sender:", item['Sender'])
+    print("Subject:", item['Subject'])
+    print("Date:", item['Date'])
+    print("Message Body:", item['Message_body'])
+
 # Exporting the values as .csv
 with open('last_10_emails.csv', 'w', encoding='utf-8', newline='') as csvfile: 
-    fieldnames = ['Sender', 'Subject', 'Date', 'Snippet', 'Message_body']
+    fieldnames = ['Sender', 'Subject', 'Date', 'Message_body']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=',')
     writer.writeheader()
     writer.writerows(final_list)
+
+#  =====================================================================================================================================
+
+# POS TAGGING
+pos_tags = []
+for item in final_list:
+    cleaned_message = re.sub(r'[^\w\s]', '', item['Message_body'])
+    # Process each cleaned message body
+    doc = nlp(cleaned_message.lower())
+    # Get part-of-speech tags for each token in the message body
+    pos_tags_for_message = [(token.text, token.pos_) for token in doc]
+    pos_tags.append(pos_tags_for_message)
+
+print("\n\n===================================================================\n\n")
+# Print POS tags for each message body
+# for idx, tags in enumerate(pos_tags):
+#     print('='*100)
+#     print("Message Number:", idx+1)
+#     for tag in tags:
+#         print(tag[0], "-", tag[1])
+
+for i in pos_tags:
+    print(i)
+    print("\n\n")
+
+
+# =====================================================================================================================================
