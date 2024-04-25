@@ -17,6 +17,13 @@ from nltk.corpus import stopwords
 import nltk
 import emoji
 from spellchecker import SpellChecker
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+import numpy as np
 
 # =====================================================================================================================================
 
@@ -112,7 +119,7 @@ def format_date(date_str):
 # MAIN CODE
 
 # Getting last 10 emails
-unread_msgs = GMAIL.users().messages().list(userId='me', labelIds=[label_id_one, label_id_two], maxResults=10).execute()
+unread_msgs = GMAIL.users().messages().list(userId='me', labelIds=[label_id_one, label_id_two], maxResults=50).execute()
 
 # We get a dictionary. Now reading values for the key 'messages'
 mssg_list = unread_msgs.get('messages', [])
@@ -203,9 +210,115 @@ print("\n\n===================================================================\n
 #     for tag in tags:
 #         print(tag[0], "-", tag[1])
 
-for i in pos_tags:
-    print(i)
-    print("\n\n")
+# for i in pos_tags:
+#     print(i)
+#     print("\n\n")
 
 
 # =====================================================================================================================================
+
+# TF-IDF AND COUNT VECTORIZATION (K-MEANS)
+
+# Extract message bodies for TF-IDF and Count Vectorization
+messages = [item['Message_body'] for item in final_list]
+
+# TF-IDF Vectorization
+tfidf_vectorizer = TfidfVectorizer(max_df=0.8, max_features=1000, min_df=0.2, stop_words='english', use_idf=True)
+tfidf_matrix = tfidf_vectorizer.fit_transform(messages)
+
+# Count Vectorization
+count_vectorizer = CountVectorizer(max_df=0.8, max_features=1000, min_df=0.2, stop_words='english')
+count_matrix = count_vectorizer.fit_transform(messages)
+
+# Determine the number of clusters based on the minimum of number of samples and number of clusters
+num_clusters = min(len(final_list), 3)  # Adjust as needed
+
+# K-means clustering using TF-IDF features
+km_tfidf = KMeans(n_clusters=num_clusters)
+km_tfidf.fit(tfidf_matrix)
+clusters_tfidf = km_tfidf.labels_.tolist()
+
+# K-means clustering using Count Vectorizer features
+km_count = KMeans(n_clusters=num_clusters)
+km_count.fit(count_matrix)
+clusters_count = km_count.labels_.tolist()
+
+# Adding cluster labels to final_list
+for idx, item in enumerate(final_list):
+    item['Cluster_TFIDF'] = clusters_tfidf[idx]
+    item['Cluster_Count'] = clusters_count[idx]
+
+# Print clusters
+# print("\n\nTF-IDF Clusters:")
+for i in range(num_clusters):
+    # print(f"\nCluster {i}:")
+    for idx, item in enumerate(final_list):
+        if item['Cluster_TFIDF'] == i:
+            pass
+            # print(f"Sender: {item['Sender']} - Subject: {item['Subject']}")
+
+print("\n\nCount Vectorizer Clusters:")
+for i in range(num_clusters):
+    # print(f"\nCluster {i}:")
+    for idx, item in enumerate(final_list):
+        if item['Cluster_Count'] == i:
+            pass
+            # print(f"Sender: {item['Sender']} - Subject: {item['Subject']}")
+
+
+# Reduce dimensionality for visualization
+pca = PCA(n_components=2)
+tfidf_pca = pca.fit_transform(tfidf_matrix.toarray())
+
+# Further reduce dimensionality with t-SNE
+perplexity = min(len(final_list) - 1, 50)  # Adjust the perplexity to be less than the number of samples
+tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42)
+tfidf_tsne = tsne.fit_transform(tfidf_pca)
+
+# Plot clusters
+plt.figure(figsize=(10, 6))
+for cluster_label in range(num_clusters):
+    cluster_points = tfidf_tsne[np.array(clusters_tfidf) == cluster_label]
+    plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster_label}')
+
+plt.title('t-SNE Visualization of TF-IDF Clusters')
+plt.xlabel('t-SNE Component 1')
+plt.ylabel('t-SNE Component 2')
+plt.legend()
+plt.show()
+
+
+# =====================================================================================================================================
+
+# DOC2VEC (K-MEANS)
+
+# Preprocess messages for Doc2Vec
+tagged_data = [TaggedDocument(words=message.split(), tags=[str(idx)]) for idx, message in enumerate(messages)]
+
+# Train Doc2Vec model
+doc2vec_model = Doc2Vec(vector_size=100, window=5, min_count=1, workers=4, epochs=20)
+doc2vec_model.build_vocab(tagged_data)
+doc2vec_model.train(tagged_data, total_examples=doc2vec_model.corpus_count, epochs=doc2vec_model.epochs)
+
+# Get document embeddings
+doc_embeddings = [doc2vec_model.infer_vector(message.split()) for message in messages]
+
+# Determine the number of clusters based on the minimum of number of samples and number of clusters
+num_clusters = min(len(final_list), 3)  # Adjust as needed
+
+# Perform K-means clustering
+km_doc2vec = KMeans(n_clusters=num_clusters)
+km_doc2vec.fit(doc_embeddings)
+clusters_doc2vec = km_doc2vec.labels_.tolist()
+
+# Adding cluster labels to final_list
+for idx, item in enumerate(final_list):
+    item['Cluster_Doc2Vec'] = clusters_doc2vec[idx]
+
+# Print clusters
+print("\n\nDoc2Vec Clusters:")
+for i in range(num_clusters):
+    print(f"\nCluster {i}:")
+    for idx, item in enumerate(final_list):
+        if item['Cluster_Doc2Vec'] == i:
+            print(f"Sender: {item['Sender']} - Subject: {item['Subject']}")
