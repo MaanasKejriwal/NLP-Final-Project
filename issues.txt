@@ -1,0 +1,4 @@
+**DATA CLEANING**
+1. What to do with HTML code in emails (superset majorly)
+2. What to do with Images
+3. What if somethings are written in other languages (Emails from some collectives, siyahi, etc)
